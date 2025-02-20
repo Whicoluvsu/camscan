@@ -1,4 +1,4 @@
-# CamScan - Made for Blackpill
+# CamScan - Made for blackpill
 
 Ultra-fast network camera scanner with automatic screenshot capture. Scans entire networks to find IP cameras, DVRs, and NVRs.
 
@@ -9,7 +9,7 @@ Ultra-fast network camera scanner with automatic screenshot capture. Scans entir
 - Support for HTTP and RTSP streams
 - Broad network range coverage
 - Brand detection for 100+ manufacturers
-- Default credential testing
+- Extensive default credential testing
 - Fast port scanning
 - Multiple detection methods
 
@@ -26,14 +26,11 @@ For the broadest possible scan, just run:
 ```bash
 python camscan.py
 ```
-This automatically scans:
-- All private networks (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
-- Link-local networks (169.254.0.0/16)
-- Common camera subnets
-- IoT networks
-- Enterprise networks
-- Special use ranges
-- Common public IP ranges
+This automatically:
+1. Scans all networks listed below
+2. Tests 60+ default credentials
+3. Captures screenshots of accessible cameras
+4. Saves results to disk
 
 ### Custom Network Scan
 Scan specific networks:
@@ -50,6 +47,41 @@ python camscan.py --threads 2000
 # Scan multiple large networks
 python camscan.py --ranges 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 8.0.0.0/8 66.0.0.0/8 71.0.0.0/8
 ```
+
+## Default Credential Testing
+
+The scanner automatically tries common credentials when it finds a camera requiring authentication:
+
+### Generic Credentials
+- admin:(empty)
+- admin:admin
+- admin:password
+- admin:12345
+- admin:123456
+- root:root
+- root:admin
+- admin:admin123
+- guest:guest
+- user:user
+And 30+ more combinations
+
+### Brand-Specific Credentials
+- Hikvision defaults (12+ combinations)
+- Dahua defaults (8+ combinations)
+- Axis defaults (6+ combinations)
+- Ubiquiti defaults
+- Foscam defaults
+- Amcrest defaults
+- Reolink defaults
+- Lorex defaults
+- Swann defaults
+And many more brand-specific combinations
+
+### Common Patterns
+- Common number sequences (12345, 54321, etc.)
+- Year-based passwords (2020, 2021, etc.)
+- Brand name + numbers
+- Simple patterns (abc123, pass123, etc.)
 
 ## Coverage Details
 
@@ -89,12 +121,15 @@ python camscan.py --ranges 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 8.0.0.0/8 66.
 ## Output
 
 - Found cameras are logged to `found_cameras.txt`
-- Screenshots are saved to `camera_screenshots/` directory
-- Live console output shows discoveries
+- Screenshots saved to `camera_screenshots/` directory
+- Live console output shows:
+  - Discovered cameras
+  - Successful credential attempts
+  - Screenshot captures
 
 ## Security Notice
 
-⚠️ **IMPORTANT**: Only scan networks you have permission to scan. Unauthorized scanning may be illegal.
+ **IMPORTANT**: Only scan networks you have permission to scan. Unauthorized scanning may be illegal.
 
 ## Tips for Maximum Results
 
@@ -105,3 +140,6 @@ python camscan.py --ranges 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 8.0.0.0/8 66.
 5. Check `found_cameras.txt` periodically for new discoveries
 6. Monitor `camera_screenshots/` for visual confirmation
 7. Use a wired connection for stability
+8. Some cameras may require multiple auth attempts
+9. Screenshots are only saved for accessible cameras
+10. Failed auth attempts are logged but not retried
