@@ -1,4 +1,4 @@
-# CamScan - Made for blackpill
+# CamScan
 
 Ultra-fast network camera scanner with automatic screenshot capture. Scans entire networks to find IP cameras, DVRs, and NVRs.
 
