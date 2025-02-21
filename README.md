@@ -1,4 +1,4 @@
-# Camera Scan
+# CamScan
 
 ## Project Overview
 Designed to scan networks for IP cameras. It automates the discovery of IP cameras by sending HTTP requests to various common paths and checking for known camera signatures in the responses. The script can also capture images from the discovered cameras and save them for further analysis, making it a useful tool for "network administrators and security professionals." 
