@@ -185,19 +185,21 @@ def is_camera(url, r=None):
         if not r:
             r = requests.get(url, timeout=2, verify=False)
             
-        if r.status_code == 401 and 'www-authenticate' in r.headers.lower():
+        headers_lower = {k.lower(): v.lower() for k, v in r.headers.items()}
+        if r.status_code == 401 and 'www-authenticate' in headers_lower:
             return True
             
         content = r.text.lower()
-        headers = str(r.headers).lower()
+        headers_str = str(headers_lower)
         
         for sig in CAMERA_SIGS:
-            if sig.lower() in content or sig.lower() in headers:
+            if sig.lower() in content or sig.lower() in headers_str:
                 return True
                 
         for header in CAMERA_HEADERS:
-            if header.lower() in r.headers:
-                header_val = str(r.headers[header]).lower()
+            header_lower = header.lower()
+            if header_lower in headers_lower:
+                header_val = headers_lower[header_lower]
                 for sig in CAMERA_SIGS:
                     if sig.lower() in header_val:
                         return True
@@ -209,7 +211,11 @@ def is_camera(url, r=None):
             return True
             
         return False
-    except:
+    except requests.exceptions.RequestException as e:
+        print(f"Request error in is_camera for {url}: {str(e)}")
+        return False
+    except Exception as e:
+        print(f"Unexpected error in is_camera for {url}: {str(e)}")
         return False
 
 def capture_camera_image(url, auth=None):
@@ -277,9 +283,11 @@ def capture_camera_image(url, auth=None):
                         
                         print(f"✓ Captured image from {img_url} -> {filename}")
                         return True
-                    except:
+                    except Exception as e:
+                        print(f"Error processing image from {img_url}: {str(e)}")
                         continue
-            except:
+            except requests.exceptions.RequestException as e:
+                print(f"Request error for {img_url}: {str(e)}")
                 continue
                 
         try:
@@ -288,37 +296,63 @@ def capture_camera_image(url, auth=None):
                 try:
                     mjpeg_url = f"{url.rstrip('/')}/{path.lstrip('/')}"
                     r = requests.get(mjpeg_url, timeout=2, verify=False, auth=auth, stream=True)
+                    
                     if r.status_code == 200 and 'multipart' in r.headers.get('Content-Type', '').lower():
                         boundary = r.headers['Content-Type'].split('boundary=')[1]
                         content = b''
+                        start_time = time.time()
+                        max_time = 5  # Maximum 5 seconds for MJPEG capture
+                        max_size = 10 * 1024 * 1024  # Maximum 10MB buffer
+                        
                         for chunk in r.iter_content(chunk_size=1024):
                             content += chunk
+                            if len(content) > max_size:
+                                print(f"MJPEG buffer exceeded max size for {mjpeg_url}")
+                                break
+                                
+                            if time.time() - start_time > max_time:
+                                print(f"MJPEG capture timeout for {mjpeg_url}")
+                                break
+                                
                             if b'\r\n\r\n' in content:
-                                frame = content.split(b'\r\n\r\n')[1].split(boundary.encode())[0]
                                 try:
+                                    frame = content.split(b'\r\n\r\n')[1].split(boundary.encode())[0]
                                     img = Image.open(io.BytesIO(frame))
+                                    
+                                    if img.size[0] < 32 or img.size[1] < 32:
+                                        print(f"MJPEG frame too small from {mjpeg_url}")
+                                        break
+                                        
                                     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                                     safe_url = url.replace('://', '_').replace('/', '_').replace(':', '_')
                                     auth_str = '_auth' if auth else '_open'
                                     filename = f"{SCREENSHOTS_DIR}/{timestamp}_{safe_url}{auth_str}_mjpeg.jpg"
+                                    
+                                    if img.mode != 'RGB':
+                                        img = img.convert('RGB')
                                     img.save(filename, 'JPEG', quality=95)
+                                    
                                     print(f"✓ Captured MJPEG frame from {mjpeg_url} -> {filename}")
                                     return True
-                                except:
+                                except Exception as e:
+                                    print(f"Error processing MJPEG frame from {mjpeg_url}: {str(e)}")
                                     break
-                except:
+                except requests.exceptions.RequestException as e:
+                    print(f"Request error for MJPEG {mjpeg_url}: {str(e)}")
                     continue
-        except:
-            pass
+        except Exception as e:
+            print(f"Error in MJPEG capture for {url}: {str(e)}")
             
         return False
-    except:
+    except Exception as e:
+        print(f"Unexpected error in capture_camera_image for {url}: {str(e)}")
         return False
 
 def capture_rtsp(url):
     try:
         cap = cv2.VideoCapture(url)
         if not cap.isOpened():
+            print(f"Failed to open RTSP stream: {url}")
             return False
             
         max_tries = 5
@@ -327,11 +361,16 @@ def capture_rtsp(url):
             ret, frame = cap.read()
             if ret and frame is not None and frame.size > 0:
                 break
+            print(f"Attempt {i+1}/{max_tries} failed to read RTSP frame from {url}")
             time.sleep(0.1)
             
         cap.release()
         
         if frame is not None and frame.size > 0:
+            if frame.shape[0] < 32 or frame.shape[1] < 32:
+                print(f"RTSP frame too small from {url}")
+                return False
+                
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             safe_url = url.replace('://', '_').replace('/', '_').replace(':', '_')
             filename = f"{SCREENSHOTS_DIR}/{timestamp}_{safe_url}_rtsp.jpg"
@@ -343,8 +382,10 @@ def capture_rtsp(url):
             print(f"✓ Captured RTSP frame from {url} -> {filename}")
             return True
             
+        print(f"Failed to capture valid frame from RTSP stream: {url}")
         return False
-    except:
+    except Exception as e:
+        print(f"Error in RTSP capture for {url}: {str(e)}")
         return False
 
 def save_camera(url, reason):
