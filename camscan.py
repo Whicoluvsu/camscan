@@ -18,8 +18,8 @@ import time
 import uuid
 import logging
 from queue import Queue
+from threading import Semaphore
 
-# Configure logging
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -30,6 +30,14 @@ RESULTS_FILE = "found_cameras.txt"
 SCREENSHOTS_DIR = "camera_screenshots"
 os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
 discovered = Queue()
+
+MAX_WORKERS = min(32, (os.cpu_count() or 1) * 4) 
+SCAN_LOCK = Semaphore(MAX_WORKERS)  
+TIMEOUT_RATE_THRESHOLD = 0.5  
+current_timeout_rate = 0.0
+timeout_lock = threading.Lock()
+TIMEOUT = 10.0 
+RETRIES = 5  
 
 DEFAULT_CREDS = [
     None, 
@@ -189,6 +197,13 @@ CAMERA_HEADERS = [
 
 CAMERA_PATHS = ["/", "/index.html", "/login.html", "/admin.html", "/cgi-bin/"]
 
+def is_valid_ip(ip):
+    try:
+        socket.inet_aton(ip)
+        return True
+    except socket.error:
+        return False
+
 def is_camera(url, r=None):
     try:
         if not r:
@@ -316,8 +331,8 @@ def capture_camera_image(url, auth=None):
                         boundary = r.headers['Content-Type'].split('boundary=')[1]
                         content = b''
                         start_time = time.time()
-                        max_time = 5  # Maximum 5 seconds for MJPEG capture
-                        max_size = 10 * 1024 * 1024  # Maximum 10MB buffer
+                        max_time = 5  
+                        max_size = 10 * 1024 * 1024  
                         
                         for chunk in r.iter_content(chunk_size=1024):
                             content += chunk
@@ -434,41 +449,59 @@ def try_auth(url):
             raise e
     return False
 
-# Increase timeout duration and number of retries
-TIMEOUT = 10.0  # Increased from 5.0 to 10.0 seconds
-RETRIES = 5  # Increased from 3 to 5 retries
-
-def is_valid_ip(ip):
-    try:
-        socket.inet_aton(ip)  # Validate IP format
-        return True
-    except socket.error:
-        return False
+def adaptive_thread_adjustment():
+    """Dynamically adjust thread count based on timeout rate"""
+    global MAX_WORKERS, current_timeout_rate
+    
+    with timeout_lock:
+        if current_timeout_rate > TIMEOUT_RATE_THRESHOLD:
+            new_workers = max(10, MAX_WORKERS // 2)
+            if new_workers != MAX_WORKERS:
+                logging.warning(f"High timeout rate ({current_timeout_rate:.1%}). Reducing threads from {MAX_WORKERS} to {new_workers}")
+                MAX_WORKERS = new_workers
+        elif current_timeout_rate < 0.2 and MAX_WORKERS < 50:
+            new_workers = min(50, MAX_WORKERS + 5)
+            if new_workers != MAX_WORKERS:
+                logging.info(f"Low timeout rate ({current_timeout_rate:.1%}). Increasing threads to {new_workers}")
+                MAX_WORKERS = new_workers
 
 def scan_ip(ip):
+    global current_timeout_rate
+    
     if not is_valid_ip(ip):
-        logging.error(f"Invalid IP address: {ip}")
         return False
 
     url = str(ip)
-    for attempt in range(RETRIES):
-        try:
-            r = requests.get(f'http://{url}', timeout=TIMEOUT, verify=True)
-            r.close()
-            if is_camera(url, r):
-                save_camera(url, 'Open camera')
-                if capture_camera_image(url):
-                    save_camera(url, 'Successfully captured open camera image')
-                    return True
-                if try_auth(url):
-                    save_camera(url, 'Successfully authenticated and captured image')
-                    return True
-            return True  # Return true if successful
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Attempt {attempt + 1} failed for {url}: {str(e)}")
-            if attempt == RETRIES - 1:
-                logging.error(f"Max retries exceeded for {url}. Skipping.")
-            continue
+    timeout_count = 0
+    
+    with SCAN_LOCK:  
+        for attempt in range(RETRIES):
+            try:
+                if attempt > 0:
+                    time.sleep(0.2 * attempt) 
+                
+                r = requests.get(f'http://{url}', timeout=TIMEOUT, verify=True)
+                r.close()
+                
+                if is_camera(url, r):
+                    save_camera(url, 'Open camera')
+                    if capture_camera_image(url):
+                        save_camera(url, 'Successfully captured open camera image')
+                    if try_auth(url):
+                        save_camera(url, 'Successfully authenticated and captured image')
+                return True
+                
+            except requests.exceptions.Timeout:
+                timeout_count += 1
+            except requests.exceptions.RequestException as e:
+                logging.debug(f"Request error for {url}: {str(e)}")
+            except Exception as e:
+                logging.error(f"Unexpected error for {url}: {str(e)}")
+
+        with timeout_lock:
+            current_timeout_rate = (current_timeout_rate * 0.9) + (0.1 * (timeout_count / RETRIES))
+            adaptive_thread_adjustment()
+    
     return False
 
 def quick_port_scan(ip):
@@ -558,44 +591,55 @@ def try_default_creds(url):
     return False
 
 def scan_network(network):
-    logging.debug(f"Starting scan_network for {network}")
+    logging.info(f"Scanning {network} with {MAX_WORKERS} threads")
     ips = list(ipaddress.ip_network(network).hosts())
-    total_ips = len(ips)  # Count total IPs to scan
     random.shuffle(ips)
-
-    start_time = time.time()  # Start time tracking
-    with ThreadPoolExecutor(max_workers=50) as executor:
-        list(executor.map(scan_ip, ips))
-
-    elapsed_time = time.time() - start_time  # Calculate elapsed time
-    logging.info(f"Scanning completed. Elapsed time: {elapsed_time:.2f} seconds")
-    logging.info(f"Final total IPs scanned: {total_ips}")  # Log final total IPs only once
-    estimated_completion_time = elapsed_time / total_ips * len(args.ranges)
-    logging.info(f"Estimated completion time for all networks: {estimated_completion_time:.2f} seconds")
+    
+    start_time = time.time()
+    processed = 0
+    
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {executor.submit(scan_ip, ip): ip for ip in ips}
+        
+        for future in as_completed(futures):
+            processed += 1
+            if processed % 100 == 0:
+                elapsed = time.time() - start_time
+                remaining = len(ips) - processed
+                est_time = (elapsed / processed) * remaining
+                logging.info(
+                    f"Progress: {processed}/{len(ips)} "
+                    f"({processed/len(ips):.1%}) | "
+                    f"ETA: {est_time/60:.1f} min | "
+                    f"Threads: {MAX_WORKERS} | "
+                    f"Timeout rate: {current_timeout_rate:.1%}"
+                )
+    
+    logging.info(f"Finished scanning {network} in {(time.time()-start_time)/60:.1f} minutes")
 
 def main():
-    logging.debug("Starting main function")
-    logging.basicConfig(level=logging.INFO)
-    
     parser = argparse.ArgumentParser()
     default_ranges = [
         '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '169.254.0.0/16',
     ]
     
-    parser.add_argument('--threads', type=int, default=50,
-                        help='Maximum number of concurrent threads (default: 50)')
-    parser.add_argument('--ranges', type=str, default=default_ranges,
-                        help='Comma-separated list of IP ranges to scan')
+    parser.add_argument('--threads', type=int, default=None,
+                      help=f'Max concurrent threads (default: auto, current: {MAX_WORKERS})')
+    parser.add_argument('--ranges', nargs='+', default=default_ranges,
+                      help='IP ranges to scan (space separated)')
     args = parser.parse_args()
     
-    logging.info(f"Starting aggressive scan of {len(args.ranges)} networks with {args.threads} threads...")
-    logging.info("Default ranges:")
-    for r in args.ranges:
-        logging.info(f"  - {r}")
+    if args.threads:
+        global MAX_WORKERS, SCAN_LOCK
+        MAX_WORKERS = max(1, min(100, args.threads))  
+        SCAN_LOCK = Semaphore(MAX_WORKERS)
     
-    with ThreadPoolExecutor(max_workers=args.threads) as ex:
+    logging.info(f"Starting scan with {MAX_WORKERS} threads")
+    logging.info(f"Target networks: {args.ranges}")
+    
+    with ThreadPoolExecutor(max_workers=min(4, MAX_WORKERS)) as ex:
         ex.map(scan_network, args.ranges)
-        
+    
     logging.info("\nScan complete! Check found_cameras.txt for results")
     logging.info(f"Screenshots saved in: {SCREENSHOTS_DIR}/")
 
