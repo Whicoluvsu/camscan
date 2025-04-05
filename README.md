@@ -1,52 +1,71 @@
-# CamScan
+# **CamScan - IP Camera Network Scanner**  
 
-## Project Overview
-Designed to scan networks for IP cameras. It automates the discovery of IP cameras by sending HTTP requests to various common paths and checking for known camera signatures in the responses. The script can also capture images from the discovered cameras and save them for further analysis, making it a useful tool for "network administrators and security professionals." 
+---
 
-## Features
-- **Network Scanning**: Efficiently scans specified IP ranges for connected cameras using multithreading.
-- **Authentication Support**: Attempts to authenticate with common default credentials for various camera brands.
-- **Image Capture**: Captures images from detected cameras and saves them locally for review.
-- **RTSP Stream Handling**: Supports capturing images from RTSP streams, enabling access to live video feeds.
-- **Threading**: Utilizes Python's threading capabilities to perform scans concurrently, improving performance.
-- **Structured Logging**: Implements logging to track the script's activity and facilitate debugging.
-- **Customizable**: Allows users to specify IP ranges and the number of concurrent threads for scanning.
+## **What It Does**  
 
-## Installation
-1. **Clone the repository**:
-   ```bash
-   git clone <repository-url>
-   cd cam
-   ```
-2. **Install the required dependencies**:
-   Make sure you have Python and pip installed. Then run:
-   ```bash
-   pip install -r requirements.txt
-   ```
+- **Finds cameras fast** - Checks for 60+ camera brands and protocols  
+- **Gets visual proof** - Captures screenshots from live feeds  
+- **Breaks weak logins** - Tests 50+ default username/password combos  
+- **Works with all camera types** - Supports HTTP, RTSP, and MJPEG streams  
+- **Plays nice with networks** - Smart throttling prevents congestion  
 
-## Usage
-Run the script with the desired IP ranges and number of threads:
+---
+
+## **Getting Started**  
+
+### **1. Install Requirements**  
 ```bash
-python camscan.py --ranges "192.168.1.0/24" --threads 50
+pip install requests opencv-python pillow numpy urllib3
 ```
 
-### Example Commands
-- To scan a specific subnet:
+### **2. Run a Scan**  
 ```bash
-python camscan.py --ranges "192.168.1.0/24" --threads 10
+# Scan a single subnet (auto-adjusts speed)
+python camscan.py --ranges 192.168.1.0/24
+
+# Full audit mode (multiple networks, max threads)
+python camscan.py --threads 30 --ranges 10.0.0.0/16 192.168.0.0/24
 ```
-- To scan multiple ranges:
-```bash
-python camscan.py --ranges "192.168.1.0/24,192.168.2.0/24" --threads 20
+
+### **3. Check Results**  
+- **`found_cameras.txt`** - Lists all discovered devices  
+- **`camera_screenshots/`** - Contains captured images  
+
+---
+
+## **Why Use This?**  
+
+I built CamScan after wasting hours manually checking IP ranges for forgotten cameras during security audits. Existing tools either missed devices or flooded networks. This version:  
+
+✔ **Actually finds cameras** - Not just web servers pretending to be cameras  
+✔ **Gets visual confirmation** - No more guessing if an IP is really a camera  
+✔ **Respects network limits** - Won't crash your router like some scripts  
+
+---
+
+## **Real-World Uses**  
+
+- **Security teams** - Find unauthorized cameras in offices  
+- **Home users** - Map all smart cameras on their network  
+- **IT departments** - Inventory surveillance systems before upgrades  
+
+---
+
+## **Warning**  
+
+*Use responsibly. Unauthorized scanning violates laws in most countries.*  
+
+---
+
+## **About the Code**  
+
+- No bloated dependencies - Runs anywhere Python works  
+- Clear logging - Know exactly what's happening  
+- Adjustable speed - From cautious scans to full network sweeps  
+
+```python
+# Example of the smart threading logic
+MAX_WORKERS = min(32, (os.cpu_count() or 1) * 4)  # Auto-scaling
+SCAN_LOCK = Semaphore(MAX_WORKERS)  # Traffic control
 ```
-
-## Troubleshooting
-- **Common Issues**:
-  - If the script fails to find cameras, ensure that the specified IP range is correct and that the cameras are powered on and connected to the network.
-  - If you encounter permission errors, try running the script with elevated privileges.
-  - Check the network settings to ensure that your machine can communicate with the target IP addresses.
-
-If you have any questions or need further assistance, feel free to open an issue in the repository.
-
-## Contributing
-Contributions are welcome! Please submit a pull request or open an issue for any enhancements or bug fixes.
