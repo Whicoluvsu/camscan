@@ -56,6 +56,12 @@ I built CamScan after wasting hours manually checking IP ranges for forgotten ca
 
 *Use responsibly. Unauthorized scanning violates laws in most countries.*  
 
+
+# ⚠️ ILLEGAL EXAMPLES (DO NOT USE) ⚠️
+```python
+python camscan.py --ranges 0.0.0.0/0      # Scans the entire internet (illegal)
+```
+
 ---
 
 ## **About the Code**  
